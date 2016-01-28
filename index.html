@@ -1,0 +1,290 @@
+<html>
+<head>
+  <meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+  <title>Projective Texture Mapping</title>
+  <script type="text/javascript" src="utils/glMatrix-0.9.5.min.js"></script>
+  <script type="text/javascript" src="utils/webgl-utils.js"></script>
+  <script type="text/javascript" src="utils/webgl-debug.js"></script>
+
+  <script id="shader-fs" type="x-shader/x-fragment">
+    precision highp float;
+
+    uniform sampler2D texSampler;
+    uniform vec2 viewportSize;
+
+    uniform vec4 uDiffuseColor; // Color for unprojected areas    
+
+    varying vec4 pass_Position;
+
+    void main(void) {
+      // Calculate the texture u;v coordinates from screen space coords
+      vec2 frag_coord = vec2(pass_Position.x / pass_Position.w, pass_Position.y / pass_Position.w);
+      frag_coord = (frag_coord + 1.0) / 2.0;
+      gl_FragColor = texture2D(texSampler, frag_coord);
+    }
+  </script>
+  <script id="shader-vs" type="x-shader/x-vertex">
+    precision highp float;
+    attribute vec3 aVertexPosition; 
+
+    uniform mat4 uProjectorMatrix;
+    uniform mat4 uViewMatrix;
+
+    varying vec4 pass_Position;
+    
+    void main(void) {
+      pass_Position = uProjectorMatrix * vec4(aVertexPosition, 1.0);
+      gl_Position = uViewMatrix * vec4(aVertexPosition, 1.0);
+    }
+  </script>
+  
+  <script type="text/javascript">
+    var gl; // gl instance
+    
+    function webGLStart() {
+      var canvas = document.getElementById("canvas");
+      try {
+        gl = canvas.getContext("experimental-webgl");
+        gl.viewportWidth = canvas.width;
+        gl.viewportHeight = canvas.height;
+      } catch (e) {}
+      if (!gl) {
+        alert("Could not initialize WebGL");
+      }
+
+      var fptex_supported = gl.getExtension('OES_texture_float'); // Enable floating point textures
+      if (fptex_supported == null) {
+        alert("Floating point textures extension not supported");
+        return;
+      }
+
+      setupGeometries();
+      setupShaderPrograms();
+      setupTextures();
+      
+      ctx = WebGLDebugUtils.makeDebugContext(gl.clearColor(0.0, 0.0, 0.0, 1.0));
+      ctx = WebGLDebugUtils.makeDebugContext(gl.enable(gl.DEPTH_TEST));
+      
+      paintLoop();
+    }
+
+    var quad_data;
+    var quad_indices;
+    var cube_data;
+    var cube_indices;
+
+    function setupGeometries() 
+    {
+      {
+        // Set up a VBO with the background quad data
+        ctx = WebGLDebugUtils.makeDebugContext(quad_data = gl.createBuffer());
+        ctx = WebGLDebugUtils.makeDebugContext(gl.bindBuffer(gl.ARRAY_BUFFER, quad_data));
+        var vbo_data = [
+          -5.0, 5.0, 0.0,
+          -5.0, -5.0, 0.0,
+          5.0, -5.0, 0.0,
+          5.0, 5.0, 0.0
+        ];
+        ctx = WebGLDebugUtils.makeDebugContext(gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(vbo_data), gl.STATIC_DRAW));
+        ctx = WebGLDebugUtils.makeDebugContext(quad_indices = gl.createBuffer());
+        ctx = WebGLDebugUtils.makeDebugContext(gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, quad_indices));
+        var indices = [
+          0, 1, 2,
+          2, 3, 0
+        ];
+        ctx = WebGLDebugUtils.makeDebugContext(gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, new Uint16Array(indices), gl.STATIC_DRAW));
+        quad_indices.count = indices.length;
+      }
+      {
+        // Set up a VBO with the cube data
+        ctx = WebGLDebugUtils.makeDebugContext(cube_data = gl.createBuffer());
+        ctx = WebGLDebugUtils.makeDebugContext(gl.bindBuffer(gl.ARRAY_BUFFER, cube_data));
+        var vbo_data = [
+          -1.0, -1.0,  1.0,
+          1.0, -1.0,  1.0,
+          1.0,  1.0,  1.0,
+          -1.0,  1.0,  1.0,
+          -1.0, -1.0, -1.0,
+          1.0, -1.0, -1.0,
+          1.0,  1.0, -1.0,
+          -1.0,  1.0, -1.0
+        ];
+        ctx = WebGLDebugUtils.makeDebugContext(gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(vbo_data), gl.STATIC_DRAW));
+        ctx = WebGLDebugUtils.makeDebugContext(cube_indices = gl.createBuffer());
+        ctx = WebGLDebugUtils.makeDebugContext(gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, cube_indices));
+        var indices = [          
+          0, 1, 2,
+          2, 3, 0,
+          1, 5, 6,
+          6, 2, 1,
+          7, 6, 5,
+          5, 4, 7,
+          4, 0, 3,
+          3, 7, 4,
+          4, 5, 1,
+          1, 0, 4,
+          3, 2, 6,
+          6, 7, 3
+        ];
+        ctx = WebGLDebugUtils.makeDebugContext(gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, new Uint16Array(indices), gl.STATIC_DRAW));
+        cube_indices.count = indices.length;
+      }
+      ctx = WebGLDebugUtils.makeDebugContext(gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, null));
+      ctx = WebGLDebugUtils.makeDebugContext(gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, null));
+    }
+
+    var texture;
+    var textureIsSafeToRender = false;
+
+    function setupTextures() {
+      ctx = WebGLDebugUtils.makeDebugContext(texture = gl.createTexture());
+      texture.image = new Image();
+      texture.image.onload = function () {
+        ctx = WebGLDebugUtils.makeDebugContext(gl.bindTexture(gl.TEXTURE_2D, texture));
+        ctx = WebGLDebugUtils.makeDebugContext(gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true));        
+        ctx = WebGLDebugUtils.makeDebugContext(gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, texture.image));
+        ctx = WebGLDebugUtils.makeDebugContext(gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR));
+        ctx = WebGLDebugUtils.makeDebugContext(gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR));
+        ctx = WebGLDebugUtils.makeDebugContext(gl.bindTexture(gl.TEXTURE_2D, null));
+        textureIsSafeToRender = true;
+      }
+      texture.image.src = "assets/testchild.png";
+    }
+
+    var visualizeProgram;
+
+    // Utility function to get and compile a shader
+    function getShader(gl, id) {
+      var shaderScript = document.getElementById(id);
+      if (!shaderScript)
+          return null;
+
+      var str = "";
+      var k = shaderScript.firstChild;
+      while (k) {
+          if (k.nodeType == 3) { // Check for TEXT_NODE
+            str += k.textContent;
+          }
+          k = k.nextSibling;
+      }
+
+      var shader;
+      if (shaderScript.type == "x-shader/x-fragment") {
+        ctx = WebGLDebugUtils.makeDebugContext(shader = gl.createShader(gl.FRAGMENT_SHADER));
+      } else if (shaderScript.type == "x-shader/x-vertex") {
+        ctx = WebGLDebugUtils.makeDebugContext(shader = gl.createShader(gl.VERTEX_SHADER));
+      } else {
+        return null;
+      }
+
+      ctx = WebGLDebugUtils.makeDebugContext(gl.shaderSource(shader, str));
+      ctx = WebGLDebugUtils.makeDebugContext(gl.compileShader(shader));
+
+      if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+        alert(gl.getShaderInfoLog(shader));
+        return null;
+      }
+
+      return shader;
+    }
+
+    function setupShaderPrograms() {      
+      var vertexShader = getShader(gl, "shader-vs");
+      var fragmentShader = getShader(gl, "shader-fs");
+      ctx = WebGLDebugUtils.makeDebugContext(visualizeProgram = gl.createProgram());
+      ctx = WebGLDebugUtils.makeDebugContext(gl.attachShader(visualizeProgram, vertexShader));
+      ctx = WebGLDebugUtils.makeDebugContext(gl.attachShader(visualizeProgram, fragmentShader));
+      ctx = WebGLDebugUtils.makeDebugContext(gl.linkProgram(visualizeProgram));
+      if (!gl.getProgramParameter(visualizeProgram, gl.LINK_STATUS))
+          alert("Could not initialize shaders");
+      ctx = WebGLDebugUtils.makeDebugContext(gl.useProgram(visualizeProgram));
+      // Bind uniforms and attributes
+      ctx = WebGLDebugUtils.makeDebugContext(visualizeProgram.uDiffuseColor = gl.getUniformLocation(visualizeProgram, "uDiffuseColor"));
+      ctx = WebGLDebugUtils.makeDebugContext(visualizeProgram.uProjectorMatrix = gl.getUniformLocation(visualizeProgram, "uProjectorMatrix"));
+      ctx = WebGLDebugUtils.makeDebugContext(visualizeProgram.uViewMatrix = gl.getUniformLocation(visualizeProgram, "uViewMatrix"));
+      ctx = WebGLDebugUtils.makeDebugContext(visualizeProgram.texSampler = gl.getUniformLocation(visualizeProgram, "texSampler"));
+      ctx = WebGLDebugUtils.makeDebugContext(visualizeProgram.viewportSize = gl.getUniformLocation(visualizeProgram, "viewportSize"));
+      ctx = WebGLDebugUtils.makeDebugContext(visualizeProgram.aVertexPosition = gl.getAttribLocation(visualizeProgram, "aVertexPosition"));
+      ctx = WebGLDebugUtils.makeDebugContext(gl.enableVertexAttribArray(visualizeProgram.aVertexPosition));
+    }
+    
+    var variableFactor = 0.0;
+
+    function drawScene() {
+      
+      if(textureIsSafeToRender == false)
+        return;
+
+      ctx = WebGLDebugUtils.makeDebugContext(gl.viewport(0, 0, gl.viewportWidth, gl.viewportHeight));
+      ctx = WebGLDebugUtils.makeDebugContext(gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT));
+
+      ctx = WebGLDebugUtils.makeDebugContext(gl.useProgram(visualizeProgram));
+      
+      var perspectiveMatrix = mat4.create();
+      var modelMatrix = mat4.create();
+      mat4.perspective(45, gl.viewportWidth / gl.viewportHeight, 0.1, 100.0, perspectiveMatrix);
+      var customView = mat4.create();
+      mat4.identity(customView);
+      //mat4.translate(customView, [variableFactor, 0, 0]);
+      mat4.rotate(customView, -(Math.PI / 20) * variableFactor, [1, 0, 0]);
+
+      // Bind texture for all geometries
+      ctx = WebGLDebugUtils.makeDebugContext(gl.activeTexture(gl.TEXTURE0));
+      ctx = WebGLDebugUtils.makeDebugContext(gl.bindTexture(gl.TEXTURE_2D, texture));
+      ctx = WebGLDebugUtils.makeDebugContext(gl.uniform1i(visualizeProgram.texSampler, 0));
+      ctx = WebGLDebugUtils.makeDebugContext(gl.uniform2fv(visualizeProgram.viewportSize, [gl.viewportWidth, gl.viewportHeight]));
+
+      // Draw the quad
+      mat4.identity(modelMatrix);
+      mat4.translate(modelMatrix, [0, 0, -15]); // Move the quad
+      mat4.rotate(modelMatrix, -Math.PI / 4, [1, 0, 0]);
+      var projectorMatrix = mat4.create();
+      mat4.identity(projectorMatrix);
+      mat4.multiply(perspectiveMatrix, modelMatrix, projectorMatrix);
+      var viewMatrix = mat4.create();
+      mat4.identity(viewMatrix);
+      mat4.multiply(perspectiveMatrix, modelMatrix, viewMatrix);
+      mat4.multiply(viewMatrix, customView, viewMatrix);
+      ctx = WebGLDebugUtils.makeDebugContext(gl.uniformMatrix4fv(visualizeProgram.uProjectorMatrix, false /* WebGL supports column-major only */, projectorMatrix));
+      ctx = WebGLDebugUtils.makeDebugContext(gl.uniformMatrix4fv(visualizeProgram.uViewMatrix, false /* WebGL supports column-major only */, viewMatrix));
+      ctx = WebGLDebugUtils.makeDebugContext(gl.uniform4fv(visualizeProgram.uDiffuseColor, [0.0, 1.0, 0.0, 1.0]));
+      ctx = WebGLDebugUtils.makeDebugContext(gl.bindBuffer(gl.ARRAY_BUFFER, quad_data));
+      ctx = WebGLDebugUtils.makeDebugContext(gl.vertexAttribPointer(visualizeProgram.aVertexPosition, 3, gl.FLOAT, false, 0, 0));
+      ctx = WebGLDebugUtils.makeDebugContext(gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, quad_indices));
+      ctx = WebGLDebugUtils.makeDebugContext(gl.drawElements(gl.TRIANGLES, quad_indices.count, gl.UNSIGNED_SHORT, 0));
+
+      // Draw the cube
+      mat4.identity(modelMatrix);
+      mat4.translate(modelMatrix, [0, 0, -10]); // Move the cube
+      projectorMatrix = mat4.create();
+      mat4.identity(projectorMatrix);
+      mat4.multiply(perspectiveMatrix, modelMatrix, projectorMatrix);
+      var viewMatrix = mat4.create();
+      mat4.identity(viewMatrix);
+      mat4.multiply(perspectiveMatrix, modelMatrix, viewMatrix);
+      mat4.multiply(viewMatrix, customView, viewMatrix);
+      ctx = WebGLDebugUtils.makeDebugContext(gl.uniformMatrix4fv(visualizeProgram.uProjectorMatrix, false /* WebGL supports column-major only */, projectorMatrix));
+      ctx = WebGLDebugUtils.makeDebugContext(gl.uniformMatrix4fv(visualizeProgram.uViewMatrix, false /* WebGL supports column-major only */, viewMatrix));
+      ctx = WebGLDebugUtils.makeDebugContext(gl.uniform4fv(visualizeProgram.uDiffuseColor, [1.0, 0.0, 0.0, 1.0]));
+      ctx = WebGLDebugUtils.makeDebugContext(gl.bindBuffer(gl.ARRAY_BUFFER, cube_data));
+      ctx = WebGLDebugUtils.makeDebugContext(gl.vertexAttribPointer(visualizeProgram.aVertexPosition, 3, gl.FLOAT, false, 0, 0));
+      ctx = WebGLDebugUtils.makeDebugContext(gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, cube_indices));      
+      ctx = WebGLDebugUtils.makeDebugContext(gl.drawElements(gl.TRIANGLES, cube_indices.count, gl.UNSIGNED_SHORT, 0));
+
+      ctx = WebGLDebugUtils.makeDebugContext(gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, null));
+      ctx = WebGLDebugUtils.makeDebugContext(gl.bindBuffer(gl.ARRAY_BUFFER, null));
+      ctx = WebGLDebugUtils.makeDebugContext(gl.bindTexture(gl.TEXTURE_2D, null));
+    }
+    
+    function paintLoop() {    
+      requestAnimFrame(paintLoop);
+      drawScene();
+      variableFactor += 0.1;
+    }
+
+  </script>
+</head>
+<body onload="webGLStart();">
+  <canvas id="canvas" style="border: none;" width="500" height="500"></canvas>
+</body>
+</html>
