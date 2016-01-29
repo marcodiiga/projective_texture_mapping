@@ -43,6 +43,7 @@
 
     uniform vec4 uDiffuseColor; // Color for unprojected areas    
 
+    varying float pass_ColorFactor;
     varying vec4 pass_Position;
 
     // Deals with floating point imprecisions
@@ -57,20 +58,43 @@
       vec4 projector_color = texture2D(texSampler, frag_coord);
       // Now check with the depth map if this is a visible pixel
       float depth_visibility = texture2D(texShadowSampler, frag_coord).r;
+
+      float n = 0.1;
+      float f = 100.0;
+      float z = depth_visibility;
+      float grey = (2.0 * n) / (f + n - z*(f-n));
+      vec4 color = vec4(grey, grey, grey, 1.0);
+      //gl_FragColor = color;
       
-      gl_FragColor = vec4(depth_visibility, 0.0, 0.0, 1.0);
+      if(pass_ColorFactor != 1.0)
+        projector_color = vec4(0.0, 0.0, 0.0, 1.0);
+
+      gl_FragColor = vec4(projector_color.xyz, 1.0); // DEBUG
     }
   </script>
   <script id="projection-shader-vs" type="x-shader/x-vertex">
     precision highp float;
-    attribute vec3 aVertexPosition; 
+    attribute vec3 aVertexPosition;
 
     uniform mat4 uProjectorMatrix;
     uniform mat4 uViewMatrix;
 
+    varying float pass_ColorFactor;
     varying vec4 pass_Position;
+
+    // Deals with floating point imprecisions
+    bool isAboutEqual(float v1, float v2) {
+      return abs(v1 - v2) < 0.001;
+    }
     
     void main(void) {
+
+      // Horrible hack to avoid normal calculations
+      if(isAboutEqual(aVertexPosition.z, -1.0) || isAboutEqual(aVertexPosition.z, 0.0))
+        pass_ColorFactor = 1.0;
+      else
+        pass_ColorFactor = 0.0;
+
       pass_Position = uProjectorMatrix * vec4(aVertexPosition, 1.0);
       gl_Position = uViewMatrix * vec4(aVertexPosition, 1.0);
     }
@@ -103,6 +127,8 @@
 
       ctx = WebGLDebugUtils.makeDebugContext(gl.clearColor(0.0, 0.0, 0.0, 1.0));
       ctx = WebGLDebugUtils.makeDebugContext(gl.enable(gl.DEPTH_TEST));
+      gl.enable(gl.CULL_FACE);
+      gl.cullFace(gl.BACK);
       
       paintLoop();
     }
@@ -112,7 +138,8 @@
     // Init the first-pass framebuffer and its texture
     function initFramebuffer() {
 
-      var depthTextureExt = gl.getExtension("WEBKIT_WEBGL_depth_texture");
+      var depthTextureExt = gl.getExtension("WEBKIT_WEBGL_depth_texture") ||
+                            gl.getExtension( "WEBGL_depth_texture" );
       if (!depthTextureExt)
         alert("Depth texture extension not supported!");
 
@@ -131,20 +158,20 @@
       ctx = WebGLDebugUtils.makeDebugContext(gl.texImage2D(gl.TEXTURE_2D, 0, gl.DEPTH_COMPONENT, depthFrameBuffer.width, depthFrameBuffer.height,
                     0, gl.DEPTH_COMPONENT, gl.UNSIGNED_SHORT, null));
 
-      ctx = WebGLDebugUtils.makeDebugContext(depthFrameBuffer.colorTexture = gl.createTexture());
-      ctx = WebGLDebugUtils.makeDebugContext(gl.bindTexture(gl.TEXTURE_2D, depthFrameBuffer.colorTexture));
-      ctx = WebGLDebugUtils.makeDebugContext(gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR));
-      ctx = WebGLDebugUtils.makeDebugContext(gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR));
-      ctx = WebGLDebugUtils.makeDebugContext(gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE));
-      ctx = WebGLDebugUtils.makeDebugContext(gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE));
-      ctx = WebGLDebugUtils.makeDebugContext(gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, depthFrameBuffer.width, depthFrameBuffer.height, 
-            0, gl.RGBA, gl.UNSIGNED_BYTE, null));
+      //ctx = WebGLDebugUtils.makeDebugContext(depthFrameBuffer.colorTexture = gl.createTexture());
+      //ctx = WebGLDebugUtils.makeDebugContext(gl.bindTexture(gl.TEXTURE_2D, depthFrameBuffer.colorTexture));
+      //ctx = WebGLDebugUtils.makeDebugContext(gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR));
+      //ctx = WebGLDebugUtils.makeDebugContext(gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR));
+      //ctx = WebGLDebugUtils.makeDebugContext(gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE));
+      //ctx = WebGLDebugUtils.makeDebugContext(gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE));
+      //ctx = WebGLDebugUtils.makeDebugContext(gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, depthFrameBuffer.width, depthFrameBuffer.height, 
+      //      0, gl.RGBA, gl.UNSIGNED_BYTE, null));
 
 
-      ctx = WebGLDebugUtils.makeDebugContext(gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, depthFrameBuffer.colorTexture, 0));
+      //ctx = WebGLDebugUtils.makeDebugContext(gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, depthFrameBuffer.colorTexture, 0));
       ctx = WebGLDebugUtils.makeDebugContext(gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.DEPTH_ATTACHMENT, gl.TEXTURE_2D, depthFrameBuffer.depthTexture, 0));
       
-      ctx = WebGLDebugUtils.makeDebugContext(gl.bindRenderbuffer(gl.RENDERBUFFER, null));
+     // ctx = WebGLDebugUtils.makeDebugContext(gl.bindRenderbuffer(gl.RENDERBUFFER, null));
       ctx = WebGLDebugUtils.makeDebugContext(gl.bindFramebuffer(gl.FRAMEBUFFER, null));
     }
 
@@ -160,7 +187,7 @@
         ctx = WebGLDebugUtils.makeDebugContext(quad_data = gl.createBuffer());
         ctx = WebGLDebugUtils.makeDebugContext(gl.bindBuffer(gl.ARRAY_BUFFER, quad_data));
         var vbo_data = [
-          -5.0, 5.0, 0.0,
+          -5.0, 5.0, 0.0,          
           -5.0, -5.0, 0.0,
           5.0, -5.0, 0.0,
           5.0, 5.0, 0.0
@@ -169,8 +196,8 @@
         ctx = WebGLDebugUtils.makeDebugContext(quad_indices = gl.createBuffer());
         ctx = WebGLDebugUtils.makeDebugContext(gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, quad_indices));
         var indices = [
-          0, 1, 2,
-          2, 3, 0
+          0, 3, 2,
+          2, 1, 0
         ];
         ctx = WebGLDebugUtils.makeDebugContext(gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, new Uint16Array(indices), gl.STATIC_DRAW));
         quad_indices.count = indices.length;
@@ -324,9 +351,12 @@
 
 
       // ------------------  First rendering pass: depth framebuffer ------------------ 
-      ctx = WebGLDebugUtils.makeDebugContext(gl.bindFramebuffer(gl.FRAMEBUFFER, depthFrameBuffer));      
+      ctx = WebGLDebugUtils.makeDebugContext(gl.bindFramebuffer(gl.FRAMEBUFFER, depthFrameBuffer));
+      ctx = WebGLDebugUtils.makeDebugContext(gl.bindTexture(gl.TEXTURE_2D, null)); // Only the depth texture is used
+      gl.enable(gl.DEPTH_TEST);
+      gl.clear(gl.DEPTH_BUFFER_BIT);
       ctx = WebGLDebugUtils.makeDebugContext(gl.viewport(0, 0, 512, 512));
-      ctx = WebGLDebugUtils.makeDebugContext(gl.clearDepth(0.2));
+      ctx = WebGLDebugUtils.makeDebugContext(gl.clearDepth(1.0));
       ctx = WebGLDebugUtils.makeDebugContext(gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT));
       ctx = WebGLDebugUtils.makeDebugContext(gl.useProgram(depthProgram));
 
@@ -339,7 +369,7 @@
       mat4.identity(projectorMatrix);
       mat4.multiply(perspectiveMatrix, viewMatrix, projectorMatrix);
       mat4.multiply(projectorMatrix, modelMatrix, projectorMatrix);
-      mat4.multiply(projectorMatrix, customView, projectorMatrix);
+      //mat4.multiply(projectorMatrix, customView, projectorMatrix);
       ctx = WebGLDebugUtils.makeDebugContext(gl.uniformMatrix4fv(depthProgram.uProjectorMatrix, false /* WebGL supports column-major only */, projectorMatrix));
       ctx = WebGLDebugUtils.makeDebugContext(gl.uniform4fv(depthProgram.uDiffuseColor, [1.0, 0.0, 0.0, 1.0]));
       ctx = WebGLDebugUtils.makeDebugContext(gl.bindBuffer(gl.ARRAY_BUFFER, quad_data));
@@ -354,7 +384,7 @@
       //mat4.translate(modelMatrix, [0, 0, -5]); // Move the cube
       mat4.multiply(perspectiveMatrix, viewMatrix, projectorMatrix);
       mat4.multiply(projectorMatrix, modelMatrix, projectorMatrix);
-      mat4.multiply(projectorMatrix, customView, projectorMatrix);
+      //mat4.multiply(projectorMatrix, customView, projectorMatrix);
       ctx = WebGLDebugUtils.makeDebugContext(gl.uniformMatrix4fv(depthProgram.uProjectorMatrix, false /* WebGL supports column-major only */, projectorMatrix));
       ctx = WebGLDebugUtils.makeDebugContext(gl.uniform4fv(depthProgram.uDiffuseColor, [1.0, 0.0, 0.0, 1.0]));
       ctx = WebGLDebugUtils.makeDebugContext(gl.bindBuffer(gl.ARRAY_BUFFER, cube_data));
@@ -365,7 +395,8 @@
       ctx = WebGLDebugUtils.makeDebugContext(gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, null));
       ctx = WebGLDebugUtils.makeDebugContext(gl.bindBuffer(gl.ARRAY_BUFFER, null));
       ctx = WebGLDebugUtils.makeDebugContext(gl.bindTexture(gl.TEXTURE_2D, null));
-      ctx = WebGLDebugUtils.makeDebugContext(gl.bindFramebuffer(gl.FRAMEBUFFER, null));      
+      ctx = WebGLDebugUtils.makeDebugContext(gl.bindFramebuffer(gl.FRAMEBUFFER, null));
+
 
       // ------------------ Second rendering pass - actual projection ------------------ 
       ctx = WebGLDebugUtils.makeDebugContext(gl.viewport(0, 0, gl.viewportWidth, gl.viewportHeight));
